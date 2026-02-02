@@ -57,8 +57,11 @@ class Transcriber:
         try:
             from youtube_transcript_api import YouTubeTranscriptApi
 
+            # Initialize the API (new style)
+            ytt_api = YouTubeTranscriptApi()
+
             # Try to get transcript in any available language
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            transcript_list = ytt_api.list(video_id)
 
             transcript = None
             detected_lang = preferred_language
@@ -94,9 +97,9 @@ class Transcriber:
 
             segments = [
                 TranscriptSegment(
-                    start=item["start"],
-                    end=item["start"] + item.get("duration", 0),
-                    text=item["text"],
+                    start=item.start,
+                    end=item.start + item.duration,
+                    text=item.text,
                 )
                 for item in transcript_data
             ]
@@ -108,7 +111,7 @@ class Transcriber:
             if detected_lang != "en":
                 try:
                     translated = transcript.translate("en").fetch()
-                    translated_text = " ".join(item["text"] for item in translated)
+                    translated_text = " ".join(item.text for item in translated)
                 except Exception:
                     # Translation not available
                     pass
