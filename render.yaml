@@ -1,0 +1,25 @@
+# Render Blueprint for Say What?
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: say-what
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.7"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        value: sqlite:///./say_what.db
+      - key: DEBUG
+        value: "false"
+      # Add your API keys in the Render dashboard
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+    healthCheckPath: /health
+    autoDeploy: true

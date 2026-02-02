@@ -1,0 +1,323 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_name }} - Multilingual Content Intelligence{% endblock %}
+
+{% block content %}
+<div x-data="homeApp()" x-init="init()">
+    <!-- Hero Section -->
+    <section class="text-center mb-16">
+        <h1 class="text-4xl sm:text-5xl font-bold mb-4">
+            <span class="gradient-text">Say What?</span>
+        </h1>
+        <p class="text-xl text-gray-600 dark:text-gray-300 mb-2">
+            ¿Qué dijiste? · 뭐라고요?
+        </p>
+        <p class="text-gray-500 dark:text-gray-400 max-w-2xl mx-auto">
+            Extract transcripts from YouTube videos, get AI-powered summaries,
+            and chat with your content in English, Spanish, or Korean.
+        </p>
+    </section>
+
+    <!-- Demo Notice -->
+    <section class="mb-12 bg-gradient-to-r from-primary-50 to-pink-50 dark:from-primary-900/20 dark:to-pink-900/20 rounded-2xl p-6 border border-primary-100 dark:border-primary-800">
+        <div class="flex items-start space-x-4">
+            <span class="text-3xl">🎯</span>
+            <div>
+                <h2 class="font-semibold text-lg mb-1">This is a Demo</h2>
+                <p class="text-gray-600 dark:text-gray-300 text-sm">
+                    Explore the 3 pre-loaded videos below — <strong>no API key needed</strong>.
+                    Each video demonstrates multilingual transcription, translation, summarization, and RAG-powered chat.
+                </p>
+                <p class="text-gray-500 dark:text-gray-400 text-sm mt-2">
+                    Want to try your own video? Scroll down to enter your API key.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Demo Videos Grid -->
+    <section class="mb-16">
+        <h2 class="text-2xl font-bold mb-6 flex items-center">
+            <span class="mr-3">🎬</span>
+            Featured Content
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {% for content in demo_contents %}
+            <a href="/content/{{ content.id }}" class="block">
+                <div class="card-hover bg-white dark:bg-gray-800 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700">
+                    <!-- Thumbnail -->
+                    <div class="relative aspect-video bg-gray-100 dark:bg-gray-700">
+                        {% if content.thumbnail_url %}
+                        <img src="{{ content.thumbnail_url }}" alt="{{ content.title }}" class="w-full h-full object-cover">
+                        {% else %}
+                        <div class="w-full h-full flex items-center justify-center">
+                            <span class="text-4xl">🎥</span>
+                        </div>
+                        {% endif %}
+
+                        <!-- Duration badge -->
+                        {% if content.duration %}
+                        <span class="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-1 rounded">
+                            {{ (content.duration // 60) }}:{{ '%02d' % (content.duration % 60) }}
+                        </span>
+                        {% endif %}
+
+                        <!-- Language badge -->
+                        <span class="absolute top-2 left-2 bg-primary-600 text-white text-xs px-2 py-1 rounded-full font-medium">
+                            {% if content.detected_language == 'en' %}🇺🇸 English
+                            {% elif content.detected_language == 'es' %}🇪🇸 Español
+                            {% elif content.detected_language == 'ko' %}🇰🇷 한국어
+                            {% else %}{{ content.detected_language }}
+                            {% endif %}
+                        </span>
+                    </div>
+
+                    <!-- Info -->
+                    <div class="p-4">
+                        <h3 class="font-semibold mb-1 line-clamp-2">{{ content.title or 'Untitled' }}</h3>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">{{ content.author or 'Unknown' }}</p>
+                    </div>
+                </div>
+            </a>
+            {% else %}
+            <!-- Placeholder cards if no demo content yet -->
+            {% for video in demo_videos %}
+            <div class="bg-white dark:bg-gray-800 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 opacity-60">
+                <div class="aspect-video bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
+                    <div class="text-center">
+                        <span class="text-4xl block mb-2">⏳</span>
+                        <span class="text-sm text-gray-500">Loading...</span>
+                    </div>
+                </div>
+                <div class="p-4">
+                    <h3 class="font-semibold mb-1">{{ video.title }}</h3>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">{{ video.category }}</p>
+                </div>
+            </div>
+            {% endfor %}
+            {% endfor %}
+        </div>
+    </section>
+
+    <!-- Try Your Own Video -->
+    <section class="mb-16">
+        <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6 sm:p-8">
+            <h2 class="text-2xl font-bold mb-2 flex items-center">
+                <span class="mr-3">🔑</span>
+                Try Your Own Video
+            </h2>
+            <p class="text-gray-500 dark:text-gray-400 mb-6">
+                Enter your API key to process your own YouTube videos.
+                <span class="text-sm">({{ max_extractions - extraction_count }} of {{ max_extractions }} extractions remaining)</span>
+            </p>
+
+            <form @submit.prevent="submitExtraction" class="space-y-6">
+                <!-- URL Input -->
+                <div>
+                    <label class="block text-sm font-medium mb-2">YouTube URL</label>
+                    <input
+                        type="url"
+                        x-model="extractionForm.url"
+                        placeholder="https://www.youtube.com/watch?v=..."
+                        class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors"
+                        required
+                    >
+                </div>
+
+                <!-- API Provider Selection -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">API Provider</label>
+                        <select
+                            x-model="extractionForm.provider"
+                            @change="updateModels()"
+                            class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        >
+                            {% for id, provider in providers.items() %}
+                            <option value="{{ id }}">{{ provider.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Model</label>
+                        <select
+                            x-model="extractionForm.model"
+                            class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        >
+                            <template x-for="(label, id) in availableModels" :key="id">
+                                <option :value="id" x-text="label"></option>
+                            </template>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- API Key -->
+                <div>
+                    <label class="block text-sm font-medium mb-2">API Key</label>
+                    <input
+                        type="password"
+                        x-model="extractionForm.apiKey"
+                        :placeholder="getKeyPlaceholder()"
+                        class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        required
+                    >
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        Your API key is only used for this request and is not stored.
+                    </p>
+                </div>
+
+                <!-- Azure Endpoint (conditional) -->
+                <div x-show="extractionForm.provider === 'azure'" x-cloak>
+                    <label class="block text-sm font-medium mb-2">Azure Endpoint</label>
+                    <input
+                        type="url"
+                        x-model="extractionForm.azureEndpoint"
+                        placeholder="https://your-resource.openai.azure.com/"
+                        class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    >
+                </div>
+
+                <!-- Submit Button -->
+                <button
+                    type="submit"
+                    :disabled="isExtracting || {{ extraction_count }} >= {{ max_extractions }}"
+                    class="w-full sm:w-auto px-8 py-3 bg-gradient-to-r from-primary-600 to-pink-600 hover:from-primary-700 hover:to-pink-700 text-white font-semibold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    <span x-show="!isExtracting">Extract & Analyze</span>
+                    <span x-show="isExtracting" x-cloak class="flex items-center">
+                        <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Processing...
+                    </span>
+                </button>
+            </form>
+
+            <!-- Status -->
+            <div x-show="extractionStatus" x-cloak class="mt-6 p-4 rounded-lg" :class="extractionError ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300' : 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300'">
+                <p x-text="extractionStatus"></p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features -->
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div class="text-center p-6">
+            <span class="text-4xl mb-4 block">🌍</span>
+            <h3 class="font-semibold mb-2">Multilingual</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400">English, Spanish, Korean transcription and translation</p>
+        </div>
+        <div class="text-center p-6">
+            <span class="text-4xl mb-4 block">🤖</span>
+            <h3 class="font-semibold mb-2">AI Summaries</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Smart summaries and key points extraction</p>
+        </div>
+        <div class="text-center p-6">
+            <span class="text-4xl mb-4 block">💬</span>
+            <h3 class="font-semibold mb-2">RAG Chat</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Ask questions about the video content</p>
+        </div>
+        <div class="text-center p-6">
+            <span class="text-4xl mb-4 block">📦</span>
+            <h3 class="font-semibold mb-2">Export Ready</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Download as JSON or Markdown</p>
+        </div>
+    </section>
+</div>
+
+<script>
+function homeApp() {
+    return {
+        providers: {{ providers | tojson }},
+        extractionForm: {
+            url: '',
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            apiKey: '',
+            azureEndpoint: ''
+        },
+        availableModels: {},
+        isExtracting: false,
+        extractionStatus: '',
+        extractionError: false,
+
+        init() {
+            this.updateModels();
+        },
+
+        updateModels() {
+            const provider = this.providers[this.extractionForm.provider];
+            if (provider) {
+                this.availableModels = provider.models;
+                this.extractionForm.model = Object.keys(provider.models)[0];
+            }
+        },
+
+        getKeyPlaceholder() {
+            const provider = this.providers[this.extractionForm.provider];
+            return provider ? provider.key_placeholder : 'Enter API key';
+        },
+
+        async submitExtraction() {
+            this.isExtracting = true;
+            this.extractionStatus = '';
+            this.extractionError = false;
+
+            try {
+                const response = await fetch('/api/extract', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        url: this.extractionForm.url,
+                        provider: this.extractionForm.provider,
+                        model: this.extractionForm.model,
+                        api_key: this.extractionForm.apiKey,
+                        azure_endpoint: this.extractionForm.azureEndpoint || null
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Extraction failed');
+                }
+
+                this.extractionStatus = `Processing started! Redirecting...`;
+
+                // Poll for status and redirect when complete
+                this.pollStatus(data.id);
+
+            } catch (error) {
+                this.extractionError = true;
+                this.extractionStatus = error.message;
+                this.isExtracting = false;
+            }
+        },
+
+        async pollStatus(contentId) {
+            const poll = async () => {
+                const response = await fetch(`/api/content/${contentId}/status`);
+                const data = await response.json();
+
+                this.extractionStatus = data.progress || 'Processing...';
+
+                if (data.status === 'completed') {
+                    window.location.href = `/content/${contentId}`;
+                } else if (data.status === 'failed') {
+                    this.extractionError = true;
+                    this.extractionStatus = data.error || 'Processing failed';
+                    this.isExtracting = false;
+                } else {
+                    setTimeout(poll, 2000);
+                }
+            };
+
+            poll();
+        }
+    };
+}
+</script>
+{% endblock %}

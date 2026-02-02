@@ -1,0 +1,538 @@
+{% extends "base.html" %}
+
+{% block title %}{{ content.title or 'Content' }} - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div x-data="contentApp()" x-init="init()">
+    <!-- Back button -->
+    <a href="/" class="inline-flex items-center text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 mb-6 transition-colors">
+        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        Back to Home
+    </a>
+
+    <!-- Content Header -->
+    <header class="mb-8">
+        <div class="flex flex-col lg:flex-row gap-6">
+            <!-- Thumbnail -->
+            <div class="lg:w-1/3">
+                <div class="aspect-video rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-700 relative">
+                    {% if content.thumbnail_url %}
+                    <img src="{{ content.thumbnail_url }}" alt="{{ content.title }}" class="w-full h-full object-cover">
+                    {% else %}
+                    <div class="w-full h-full flex items-center justify-center">
+                        <span class="text-6xl">🎬</span>
+                    </div>
+                    {% endif %}
+
+                    <!-- Play overlay linking to YouTube -->
+                    <a href="{{ content.url }}" target="_blank" class="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/40 transition-colors">
+                        <div class="w-16 h-16 rounded-full bg-white/90 flex items-center justify-center">
+                            <svg class="w-8 h-8 text-gray-900 ml-1" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M8 5v14l11-7z"></path>
+                            </svg>
+                        </div>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Info -->
+            <div class="lg:w-2/3">
+                <div class="flex items-center gap-2 mb-3">
+                    <!-- Language badge -->
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300">
+                        {% if content.detected_language == 'en' %}🇺🇸 English
+                        {% elif content.detected_language == 'es' %}🇪🇸 Español
+                        {% elif content.detected_language == 'ko' %}🇰🇷 한국어
+                        {% else %}{{ content.detected_language }}{% endif %}
+                    </span>
+
+                    {% if content.is_demo %}
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">
+                        Demo
+                    </span>
+                    {% endif %}
+                </div>
+
+                <h1 class="text-2xl sm:text-3xl font-bold mb-2">{{ content.title or 'Untitled' }}</h1>
+                <p class="text-gray-600 dark:text-gray-400 mb-4">{{ content.author or 'Unknown' }}</p>
+
+                <div class="flex flex-wrap gap-4 text-sm text-gray-500 dark:text-gray-400">
+                    {% if content.duration %}
+                    <span class="flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        {{ (content.duration // 60) }}:{{ '%02d' % (content.duration % 60) }}
+                    </span>
+                    {% endif %}
+
+                    {% if content.views %}
+                    <span class="flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                        </svg>
+                        {{ '{:,}'.format(content.views) }} views
+                    </span>
+                    {% endif %}
+
+                    {% if content.transcript_tokens %}
+                    <span class="flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        {{ '{:,}'.format(content.transcript_tokens) }} tokens
+                    </span>
+                    {% endif %}
+                </div>
+
+                <!-- Topics -->
+                {% if topics %}
+                <div class="mt-4 flex flex-wrap gap-2">
+                    {% for topic in topics %}
+                    <span class="px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-full text-sm">{{ topic }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </header>
+
+    <!-- Tabs -->
+    <div class="mb-8">
+        <div class="flex flex-wrap border-b border-gray-200 dark:border-gray-700">
+            <button
+                @click="activeTab = 'summary'"
+                :class="activeTab === 'summary' ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                class="py-4 px-6 font-medium border-b-2 transition-colors"
+            >
+                Summary
+            </button>
+            <button
+                @click="activeTab = 'transcript'"
+                :class="activeTab === 'transcript' ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                class="py-4 px-6 font-medium border-b-2 transition-colors"
+            >
+                Transcript
+            </button>
+            <button
+                @click="activeTab = 'chat'"
+                :class="activeTab === 'chat' ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                class="py-4 px-6 font-medium border-b-2 transition-colors"
+            >
+                💬 Chat
+            </button>
+            <button
+                @click="activeTab = 'export'"
+                :class="activeTab === 'export' ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                class="py-4 px-6 font-medium border-b-2 transition-colors"
+            >
+                Export
+            </button>
+        </div>
+    </div>
+
+    <!-- Summary Tab -->
+    <div x-show="activeTab === 'summary'" x-cloak>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Summary -->
+            <div class="lg:col-span-2">
+                <div class="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+                    <h2 class="text-xl font-bold mb-4 flex items-center">
+                        <span class="mr-2">📝</span> Summary
+                    </h2>
+                    <div class="prose dark:prose-invert max-w-none">
+                        {{ content.summary or 'No summary available.' }}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Key Points -->
+            <div>
+                <div class="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+                    <h2 class="text-xl font-bold mb-4 flex items-center">
+                        <span class="mr-2">✨</span> Key Points
+                    </h2>
+                    <ul class="space-y-3">
+                        {% for point in key_points %}
+                        <li class="flex items-start">
+                            <span class="text-primary-500 mr-2 mt-1">•</span>
+                            <span>{{ point }}</span>
+                        </li>
+                        {% else %}
+                        <li class="text-gray-500 dark:text-gray-400">No key points available.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Transcript Tab -->
+    <div x-show="activeTab === 'transcript'" x-cloak>
+        <div class="space-y-6">
+            <!-- Original Transcript (if not English) -->
+            {% if content.detected_language != 'en' and content.original_transcript %}
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-bold flex items-center">
+                        <span class="mr-2">📜</span>
+                        Original Transcript
+                        <span class="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400">
+                            ({% if content.detected_language == 'es' %}Español{% elif content.detected_language == 'ko' %}한국어{% else %}{{ content.detected_language }}{% endif %})
+                        </span>
+                    </h2>
+                    <button @click="copyToClipboard('{{ content.original_transcript | e }}')" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" title="Copy">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="prose dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 max-h-96 overflow-y-auto">
+                    {{ content.original_transcript }}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Translated/English Transcript -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-bold flex items-center">
+                        <span class="mr-2">🇺🇸</span>
+                        {% if content.detected_language != 'en' %}English Translation{% else %}Transcript{% endif %}
+                    </h2>
+                    <button @click="copyToClipboard('{{ (content.translated_transcript or content.original_transcript or '') | e }}')" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" title="Copy">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="prose dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 max-h-96 overflow-y-auto">
+                    {{ content.translated_transcript or content.original_transcript or 'No transcript available.' }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Tab -->
+    <div x-show="activeTab === 'chat'" x-cloak>
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <!-- Chat Header -->
+            <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+                <div class="flex flex-wrap items-center justify-between gap-4">
+                    <h2 class="text-xl font-bold flex items-center">
+                        <span class="mr-2">💬</span>
+                        Chat with this Video
+                    </h2>
+
+                    <!-- Language Toggle -->
+                    <div class="flex items-center space-x-2">
+                        <span class="text-sm text-gray-500 dark:text-gray-400">Chat in:</span>
+                        <div class="flex rounded-lg overflow-hidden border border-gray-300 dark:border-gray-600">
+                            <button
+                                @click="chatLanguage = 'en'"
+                                :class="chatLanguage === 'en' ? 'bg-primary-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300'"
+                                class="px-3 py-1.5 text-sm font-medium transition-colors"
+                            >English</button>
+                            <button
+                                @click="chatLanguage = 'es'"
+                                :class="chatLanguage === 'es' ? 'bg-primary-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300'"
+                                class="px-3 py-1.5 text-sm font-medium transition-colors border-l border-r border-gray-300 dark:border-gray-600"
+                            >Español</button>
+                            <button
+                                @click="chatLanguage = 'ko'"
+                                :class="chatLanguage === 'ko' ? 'bg-primary-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300'"
+                                class="px-3 py-1.5 text-sm font-medium transition-colors"
+                            >한국어</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- API Key input if needed -->
+                {% if needs_api_key %}
+                <div class="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                    <p class="text-sm text-yellow-700 dark:text-yellow-300 mb-3">
+                        API key required for chat. Your key is not stored.
+                    </p>
+                    <div class="flex flex-wrap gap-2">
+                        <select x-model="chatProvider" class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm">
+                            {% for id, provider in providers.items() %}
+                            <option value="{{ id }}">{{ provider.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <input
+                            type="password"
+                            x-model="chatApiKey"
+                            placeholder="Enter API key"
+                            class="flex-1 min-w-48 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm"
+                        >
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Chat Messages -->
+            <div class="h-96 overflow-y-auto p-4 space-y-4" id="chatMessages">
+                <template x-for="msg in chatMessages" :key="msg.id || msg.tempId">
+                    <!-- User message -->
+                    <div x-show="msg.role === 'user'" class="flex justify-end">
+                        <div class="chat-bubble-user text-white px-4 py-2 rounded-2xl rounded-tr-sm max-w-[80%]">
+                            <p x-text="msg.message"></p>
+                        </div>
+                    </div>
+
+                    <!-- Assistant message -->
+                    <div x-show="msg.role === 'assistant'" class="flex justify-start">
+                        <div class="chat-bubble-assistant dark:text-gray-100 px-4 py-3 rounded-2xl rounded-tl-sm max-w-[80%]">
+                            <p x-text="msg.message" class="mb-2"></p>
+
+                            <!-- Source chunks -->
+                            <div x-show="msg.sources && msg.sources.length > 0" class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Sources:</p>
+                                <div class="flex flex-wrap gap-2">
+                                    <template x-for="source in (msg.sources || [])" :key="source.chunk_index">
+                                        <a
+                                            :href="source.timestamp_link"
+                                            target="_blank"
+                                            class="text-xs px-2 py-1 bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 rounded hover:bg-primary-200 dark:hover:bg-primary-900/50 transition-colors"
+                                        >
+                                            <span x-text="formatTimestamp(source.start_time)"></span>
+                                        </a>
+                                    </template>
+                                </div>
+                            </div>
+
+                            <!-- Confidence score -->
+                            <div x-show="msg.confidence_score" class="mt-2">
+                                <span class="text-xs text-gray-500 dark:text-gray-400">
+                                    Confidence: <span x-text="Math.round((msg.confidence_score || 0) * 100) + '%'"></span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Loading indicator -->
+                <div x-show="isChatLoading" class="flex justify-start">
+                    <div class="chat-bubble-assistant px-4 py-3 rounded-2xl rounded-tl-sm">
+                        <div class="flex space-x-2">
+                            <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                            <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.1s"></div>
+                            <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Empty state -->
+                <div x-show="chatMessages.length === 0 && !isChatLoading" class="text-center py-12 text-gray-500 dark:text-gray-400">
+                    <span class="text-4xl block mb-4">💬</span>
+                    <p>Ask a question about this video!</p>
+                    <p class="text-sm mt-2">Try: "What are the main points discussed?"</p>
+                </div>
+            </div>
+
+            <!-- Chat Input -->
+            <div class="p-4 border-t border-gray-200 dark:border-gray-700">
+                <form @submit.prevent="sendMessage" class="flex space-x-2">
+                    <input
+                        type="text"
+                        x-model="chatInput"
+                        :placeholder="getChatPlaceholder()"
+                        class="flex-1 px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        :disabled="isChatLoading"
+                    >
+                    <button
+                        type="submit"
+                        :disabled="isChatLoading || !chatInput.trim()"
+                        class="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        Send
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Tab -->
+    <div x-show="activeTab === 'export'" x-cloak>
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+            <h2 class="text-xl font-bold mb-6 flex items-center">
+                <span class="mr-2">📦</span>
+                Export Content
+            </h2>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <button
+                    @click="exportContent('json')"
+                    class="p-6 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/10 transition-all text-left"
+                >
+                    <span class="text-3xl block mb-2">📋</span>
+                    <span class="font-semibold block">JSON</span>
+                    <span class="text-sm text-gray-500 dark:text-gray-400">Structured data with all metadata, chunks, and content</span>
+                </button>
+
+                <button
+                    @click="exportContent('markdown')"
+                    class="p-6 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/10 transition-all text-left"
+                >
+                    <span class="text-3xl block mb-2">📝</span>
+                    <span class="font-semibold block">Markdown</span>
+                    <span class="text-sm text-gray-500 dark:text-gray-400">Human-readable format with summary and transcript</span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function contentApp() {
+    return {
+        activeTab: 'summary',
+        contentId: {{ content.id }},
+        sessionId: '{{ session_id }}',
+
+        // Chat state
+        chatLanguage: 'en',
+        chatMessages: [],
+        chatInput: '',
+        isChatLoading: false,
+        chatProvider: 'openai',
+        chatApiKey: '',
+
+        init() {
+            this.loadChatHistory();
+        },
+
+        async loadChatHistory() {
+            try {
+                const response = await fetch(`/api/chat/history/${this.contentId}/${this.sessionId}`);
+                if (response.ok) {
+                    this.chatMessages = await response.json();
+                    this.scrollChatToBottom();
+                }
+            } catch (error) {
+                console.error('Failed to load chat history:', error);
+            }
+        },
+
+        getChatPlaceholder() {
+            const placeholders = {
+                'en': 'Ask a question about this video...',
+                'es': 'Haz una pregunta sobre este video...',
+                'ko': '이 비디오에 대해 질문하세요...'
+            };
+            return placeholders[this.chatLanguage] || placeholders['en'];
+        },
+
+        async sendMessage() {
+            if (!this.chatInput.trim() || this.isChatLoading) return;
+
+            const message = this.chatInput.trim();
+            this.chatInput = '';
+
+            // Add user message to UI immediately
+            const tempId = Date.now();
+            this.chatMessages.push({
+                tempId,
+                role: 'user',
+                message
+            });
+
+            this.isChatLoading = true;
+            this.scrollChatToBottom();
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        content_id: this.contentId,
+                        message,
+                        language: this.chatLanguage,
+                        session_id: this.sessionId,
+                        provider: this.chatProvider,
+                        model: this.getDefaultModel(),
+                        api_key: this.chatApiKey || null
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Chat failed');
+                }
+
+                // Add assistant response
+                this.chatMessages.push({
+                    ...data.message,
+                    sources: data.sources
+                });
+
+            } catch (error) {
+                this.chatMessages.push({
+                    tempId: Date.now(),
+                    role: 'assistant',
+                    message: `Error: ${error.message}`
+                });
+            }
+
+            this.isChatLoading = false;
+            this.scrollChatToBottom();
+        },
+
+        getDefaultModel() {
+            const defaults = {
+                'openai': 'gpt-4o-mini',
+                'anthropic': 'claude-3-5-haiku-20241022',
+                'google': 'gemini-1.5-flash',
+                'azure': 'gpt-4o'
+            };
+            return defaults[this.chatProvider] || 'gpt-4o-mini';
+        },
+
+        scrollChatToBottom() {
+            this.$nextTick(() => {
+                const container = document.getElementById('chatMessages');
+                if (container) {
+                    container.scrollTop = container.scrollHeight;
+                }
+            });
+        },
+
+        formatTimestamp(seconds) {
+            if (!seconds) return '0:00';
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        },
+
+        copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                // Could add a toast notification here
+                alert('Copied to clipboard!');
+            });
+        },
+
+        async exportContent(format) {
+            try {
+                const response = await fetch(`/api/content/${this.contentId}/export?format=${format}`);
+                const data = await response.json();
+
+                // Download the file
+                const blob = new Blob([data.content], { type: format === 'json' ? 'application/json' : 'text/markdown' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = data.filename;
+                a.click();
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                alert('Export failed: ' + error.message);
+            }
+        }
+    };
+}
+</script>
+{% endblock %}

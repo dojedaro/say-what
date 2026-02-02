@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block title %}About - {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto">
+    <!-- Header -->
+    <header class="text-center mb-12">
+        <h1 class="text-4xl font-bold mb-4">
+            <span class="gradient-text">About Say What?</span>
+        </h1>
+        <p class="text-xl text-gray-600 dark:text-gray-300">
+            A multilingual content intelligence platform
+        </p>
+    </header>
+
+    <!-- Content -->
+    <div class="prose dark:prose-invert max-w-none">
+        <section class="bg-white dark:bg-gray-800 rounded-xl p-8 border border-gray-200 dark:border-gray-700 mb-8">
+            <h2 class="text-2xl font-bold mb-4 flex items-center">
+                <span class="mr-3">🎯</span> What is this?
+            </h2>
+            <p>
+                <strong>Say What?</strong> is a portfolio demonstration project that showcases modern AI capabilities
+                for content extraction and analysis. It extracts transcripts from YouTube videos, translates them
+                across languages, generates AI-powered summaries, and enables RAG-powered conversations with the content.
+            </p>
+        </section>
+
+        <section class="bg-white dark:bg-gray-800 rounded-xl p-8 border border-gray-200 dark:border-gray-700 mb-8">
+            <h2 class="text-2xl font-bold mb-4 flex items-center">
+                <span class="mr-3">✨</span> Features
+            </h2>
+            <ul class="space-y-3">
+                <li class="flex items-start">
+                    <span class="text-primary-500 mr-3">🌍</span>
+                    <div>
+                        <strong>Multilingual Support</strong>
+                        <p class="text-gray-600 dark:text-gray-400">Transcription and translation between English, Spanish, and Korean</p>
+                    </div>
+                </li>
+                <li class="flex items-start">
+                    <span class="text-primary-500 mr-3">🤖</span>
+                    <div>
+                        <strong>AI Summarization</strong>
+                        <p class="text-gray-600 dark:text-gray-400">Intelligent summaries, key points extraction, and topic identification</p>
+                    </div>
+                </li>
+                <li class="flex items-start">
+                    <span class="text-primary-500 mr-3">💬</span>
+                    <div>
+                        <strong>RAG-Powered Chat</strong>
+                        <p class="text-gray-600 dark:text-gray-400">Ask questions about video content with grounded, citation-backed answers</p>
+                    </div>
+                </li>
+                <li class="flex items-start">
+                    <span class="text-primary-500 mr-3">🛡️</span>
+                    <div>
+                        <strong>Hallucination Prevention</strong>
+                        <p class="text-gray-600 dark:text-gray-400">Responses are strictly grounded in the actual video content</p>
+                    </div>
+                </li>
+                <li class="flex items-start">
+                    <span class="text-primary-500 mr-3">📦</span>
+                    <div>
+                        <strong>Export Ready</strong>
+                        <p class="text-gray-600 dark:text-gray-400">Download content as JSON or Markdown for further use</p>
+                    </div>
+                </li>
+            </ul>
+        </section>
+
+        <section class="bg-white dark:bg-gray-800 rounded-xl p-8 border border-gray-200 dark:border-gray-700 mb-8">
+            <h2 class="text-2xl font-bold mb-4 flex items-center">
+                <span class="mr-3">🛠️</span> Tech Stack
+            </h2>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg text-center">
+                    <strong>FastAPI</strong>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">Backend</p>
+                </div>
+                <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg text-center">
+                    <strong>Tailwind CSS</strong>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">Styling</p>
+                </div>
+                <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg text-center">
+                    <strong>Alpine.js</strong>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">Interactivity</p>
+                </div>
+                <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg text-center">
+                    <strong>ChromaDB</strong>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">Vector Store</p>
+                </div>
+                <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg text-center">
+                    <strong>yt-dlp</strong>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">Extraction</p>
+                </div>
+                <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg text-center">
+                    <strong>Whisper</strong>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">Transcription</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="bg-white dark:bg-gray-800 rounded-xl p-8 border border-gray-200 dark:border-gray-700 mb-8">
+            <h2 class="text-2xl font-bold mb-4 flex items-center">
+                <span class="mr-3">🔑</span> API Providers
+            </h2>
+            <p class="mb-4">This demo supports multiple AI providers. Bring your own API key to process your own videos:</p>
+            <ul class="space-y-2">
+                <li><strong>OpenAI</strong> - GPT-4o, GPT-4o Mini</li>
+                <li><strong>Anthropic</strong> - Claude 3.5 Sonnet, Claude 3.5 Haiku, Claude 3 Opus</li>
+                <li><strong>Google</strong> - Gemini 1.5 Pro, Gemini 1.5 Flash</li>
+                <li><strong>Microsoft Azure</strong> - GPT-4o via Azure OpenAI</li>
+            </ul>
+        </section>
+
+        <section class="bg-gradient-to-r from-primary-50 to-pink-50 dark:from-primary-900/20 dark:to-pink-900/20 rounded-xl p-8 border border-primary-100 dark:border-primary-800">
+            <h2 class="text-2xl font-bold mb-4 flex items-center">
+                <span class="mr-3">👨‍💻</span> About the Developer
+            </h2>
+            <p>
+                This project was built as a portfolio demonstration of full-stack development skills,
+                AI integration, and modern web technologies. It showcases the ability to build
+                production-ready applications that leverage cutting-edge AI capabilities.
+            </p>
+            <div class="mt-6">
+                <a href="/" class="inline-flex items-center px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg transition-colors">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                    </svg>
+                    Try the Demo
+                </a>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}
