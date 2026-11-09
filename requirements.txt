@@ -1,43 +1,29 @@
-# Say What? - Dependencies
+# Runtime dependencies (pinned for reproducible builds).
+# Whisper (local transcription for non-YouTube videos) is optional: see requirements-whisper.txt
 
-# Web Framework
-fastapi>=0.109.0
-uvicorn[standard]>=0.27.0
-python-multipart>=0.0.9
-jinja2>=3.1.0
+# Web framework
+fastapi==0.162.2
+uvicorn[standard]==0.54.0
+jinja2==3.1.6
+itsdangerous==2.2.0  # signed session cookies
 
 # Database
-sqlalchemy>=2.0.0
-aiosqlite>=0.19.0
+sqlalchemy==2.1.8
 
-# HTTP Client
-httpx>=0.26.0
-aiohttp>=3.9.0
+# Video + transcripts
+yt-dlp==2026.10.26
+youtube-transcript-api==1.2.5
 
-# Video Extraction
-yt-dlp>=2024.1.0
+# LLM providers
+openai==3.46.0
+anthropic==2.6.0
+google-genai==3.0.0
 
-# Transcription
-openai-whisper>=20231117
-youtube-transcript-api>=0.6.0
+# Retrieval
+chromadb==1.5.9
+tiktoken==0.14.0
 
-# AI Providers
-openai>=1.12.0
-anthropic>=0.18.0
-google-generativeai>=0.4.0
-
-# Vector Store & Embeddings
-chromadb>=0.4.0
-tiktoken>=0.6.0
-
-# Settings & Validation
-pydantic>=2.6.0
-pydantic-settings>=2.1.0
-python-dotenv>=1.0.0
-
-# Utilities
-langdetect>=1.0.9
-python-slugify>=8.0.0
-
-# Session Management
-itsdangerous>=2.1.0
+# Settings
+pydantic==2.14.3
+pydantic-settings==2.16.2
+python-dotenv==1.2.4

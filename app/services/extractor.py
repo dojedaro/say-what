@@ -1,26 +1,31 @@
 """Video extraction service using yt-dlp."""
 
-import re
 import os
-import json
-from typing import Optional
+import re
 from dataclasses import dataclass
+
 import yt_dlp
 
 from app.config import get_settings
 
-settings = get_settings()
+
+def timestamp_url(platform: str, video_id: str | None, seconds: float | None) -> str | None:
+    """Deep link to a moment in the video, when the platform supports it."""
+    if platform != "youtube" or not video_id or seconds is None:
+        return None
+    return f"https://www.youtube.com/watch?v={video_id}&t={int(seconds)}s"
 
 
 @dataclass
 class VideoMetadata:
     """Extracted video metadata."""
+
     video_id: str
     platform: str
     title: str
     author: str
     duration: int  # seconds
-    views: Optional[int]
+    views: int | None
     thumbnail_url: str
     url: str
 
@@ -43,10 +48,11 @@ class VideoExtractor:
 
     def __init__(self):
         """Initialize extractor with temp directory."""
-        self.temp_dir = settings.temp_dir
+        self.temp_dir = get_settings().temp_dir
         os.makedirs(self.temp_dir, exist_ok=True)
 
-    def detect_platform(self, url: str) -> tuple[str, str]:
+    @classmethod
+    def detect_platform(cls, url: str) -> tuple[str, str]:
         """
         Detect platform and extract video ID from URL.
 
@@ -56,7 +62,7 @@ class VideoExtractor:
         Raises:
             ValueError: If URL doesn't match any supported platform
         """
-        for platform, patterns in self.PLATFORM_PATTERNS.items():
+        for platform, patterns in cls.PLATFORM_PATTERNS.items():
             for pattern in patterns:
                 match = re.search(pattern, url)
                 if match:
@@ -134,7 +140,3 @@ class VideoExtractor:
         """Remove temporary audio file."""
         if os.path.exists(audio_path):
             os.remove(audio_path)
-
-    def get_youtube_timestamp_url(self, video_id: str, seconds: float) -> str:
-        """Generate YouTube URL with timestamp."""
-        return f"https://www.youtube.com/watch?v={video_id}&t={int(seconds)}s"

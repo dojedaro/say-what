@@ -1,160 +1,142 @@
 # Say What? · ¿Qué dijiste? · 뭐라고요?
 
-A multilingual content intelligence platform with RAG-powered chat.
+**Ask questions about any video, in English, Spanish or Korean, and get answers grounded in what was actually said, with timestamped citations.**
 
-![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
+[![CI](https://github.com/dojedaro/say-what/actions/workflows/ci.yml/badge.svg)](https://github.com/dojedaro/say-what/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.11-blue.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.162-009688.svg)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-## 🎯 What is this?
+Say What? turns a YouTube, TikTok or Instagram video into searchable knowledge. It transcribes the video, translates it, summarizes it, and indexes it for retrieval-augmented chat that refuses to answer when the video doesn't cover the question.
 
-**Say What?** extracts transcripts from YouTube videos, translates them across languages (English, Spanish, Korean), generates AI-powered summaries, and enables RAG-powered conversations with the content.
+## Features
 
-### Features
+- **Multilingual end-to-end:** transcripts, summaries and chat in English, Spanish and Korean. Ask in Spanish about a Korean video.
+- **Grounded RAG chat:** answers use only retrieved transcript chunks, cite the moment in the video, and come with a retrieval-confidence score.
+- **Refuses instead of guessing:** if nothing relevant is retrieved, the model is never called for an answer.
+- **Bring your own model:** OpenAI, Anthropic Claude, Google Gemini or Azure OpenAI behind one interface. Visitor keys are used per request and never stored.
+- **Export:** JSON (including RAG-ready chunks) or Markdown.
 
-- 🌍 **Multilingual** - Transcription and translation between EN/ES/KO
-- 🤖 **AI Summaries** - Intelligent summaries and key points extraction
-- 💬 **RAG Chat** - Ask questions about video content with cited sources
-- 🛡️ **Grounded Responses** - Strict hallucination prevention
-- 📦 **Export Ready** - Download as JSON or Markdown
+## How it works
 
-## 🚀 Quick Start
+```mermaid
+flowchart LR
+    URL[Video URL] --> E[Extract metadata<br/>yt-dlp]
+    E --> T{YouTube captions?}
+    T -- yes --> C[Caption API<br/>+ auto-translate]
+    T -- no --> W[Whisper<br/>transcribe + translate]
+    C --> S[LLM summary<br/>key points, topics]
+    W --> S
+    S --> K[Token-aware chunking<br/>on timestamp boundaries]
+    K --> V[(ChromaDB<br/>English embeddings)]
 
-### Prerequisites
+    Q[Question in EN/ES/KO] --> TR[Translate query<br/>to English]
+    TR --> R[Retrieve top-k<br/>cosine ≥ 0.3]
+    V --> R
+    R -->|no hits| N[Localized<br/>'not covered']
+    R -->|hits| G[Grounded answer<br/>in user's language]
+```
 
-- Python 3.11+
-- FFmpeg (for audio processing)
+### Design decisions
 
-### Installation
+| Decision | Why |
+|---|---|
+| **Embed the English translation, keep the original text for display** | One embedding space for all three languages. Cross-lingual queries work without a multilingual embedding model, and users still see the original words. |
+| **Chunk on caption/Whisper segment boundaries** | Chunks never split a sentence mid-timestamp, so every citation links to a playable moment (`&t=125s`). |
+| **Similarity threshold before generation** | The cheapest hallucination guard is to not ask the model at all when retrieval finds nothing relevant. |
+| **One `LLMClient` interface for four providers** | Features ask for "system + user → text". Provider quirks (Claude thinking blocks, Gemini config, Azure endpoints) are contained in one module. |
+| **One `ContentPipeline` shared by the API and the seed script** | A single implementation of extract → transcribe → summarize → chunk → index. Re-runnable on failed items. |
+| **Blocking work runs in worker threads** | Whisper, yt-dlp and LLM calls are synchronous. The background task and chat endpoint are plain `def`, so FastAPI runs them in a threadpool and the event loop stays responsive. |
+| **Whisper is an optional dependency** | It pulls in PyTorch (~1 GB). Without it, the app still handles any video with YouTube captions. |
+
+## Quick start
 
 ```bash
-# Clone the repository
-git clone https://github.com/YOUR_USERNAME/say-what.git
+git clone https://github.com/dojedaro/say-what.git
 cd say-what
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt     # add -r requirements-whisper.txt for TikTok/Instagram (needs FFmpeg)
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Copy environment file
-cp .env.example .env
-# Edit .env with your API keys (optional - only needed for seeding demo content)
-
-# Initialize database and run
+cp .env.example .env                # optional: a server key enables demo seeding and demo chat
 uvicorn app.main:app --reload
 ```
 
-Visit http://localhost:8000 to see the app.
+Open http://localhost:8000. Interactive API docs are at `/docs`.
 
-### Seed Demo Content (Optional)
-
-To pre-load the 3 demo videos:
+**Pre-load the demo videos** (needs one of `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `GOOGLE_API_KEY` in `.env`):
 
 ```bash
 python scripts/seed_demo.py
 ```
 
-This requires an API key in your `.env` file.
-
-## 🏗️ Architecture
-
-```
-app/
-├── main.py              # FastAPI entry point
-├── config.py            # Environment settings
-├── database.py          # SQLAlchemy setup
-├── models.py            # Database models
-├── schemas.py           # Pydantic schemas
-├── routers/
-│   ├── api.py           # REST API endpoints
-│   ├── chat.py          # RAG chat endpoints
-│   └── web.py           # Web UI routes
-├── services/
-│   ├── extractor.py     # yt-dlp video extraction
-│   ├── transcriber.py   # Whisper + YouTube transcripts
-│   ├── summarizer.py    # Multi-provider summarization
-│   ├── chunker.py       # RAG-ready chunking
-│   ├── vector_store.py  # ChromaDB embeddings
-│   └── chat.py          # Grounded RAG chat
-└── templates/           # Jinja2 + Tailwind + Alpine.js
-```
-
-## 🔑 API Providers Supported
-
-| Provider | Models |
-|----------|--------|
-| OpenAI | GPT-4o, GPT-4o Mini |
-| Anthropic | Claude 3.5 Sonnet, Claude 3.5 Haiku, Claude 3 Opus |
-| Google | Gemini 1.5 Pro, Gemini 1.5 Flash |
-| Azure | GPT-4o via Azure OpenAI |
-
-## 📡 API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/extract` | Submit URL for processing |
-| GET | `/api/content/{id}` | Get processed content |
-| GET | `/api/content/{id}/chunks` | Get RAG-ready chunks |
-| GET | `/api/content/{id}/export` | Export as JSON/MD |
-| GET | `/api/contents` | List all content |
-| POST | `/api/chat` | Send chat message |
-| GET | `/api/chat/history/{id}/{session}` | Get chat history |
-
-## 🎬 Demo Videos
-
-The platform includes 3 pre-loaded demo videos showcasing multilingual capabilities:
-
-1. **English** - Dario Amodei (Anthropic CEO) interview
-2. **Spanish** - Checo Pérez (F1 driver) interview
-3. **Korean** - Korean news report
-
-## 🚢 Deployment
-
-### Render
-
-1. Connect your GitHub repository
-2. Create a new Web Service
-3. Set environment variables in Render dashboard
-4. Deploy!
-
-The `render.yaml` file is included for easy deployment.
+| Demo | Language |
+|---|---|
+| Dario Amodei interview | English |
+| Checo Pérez interview | Spanish |
+| Korean news report | Korean |
 
 ### Docker
 
 ```bash
-docker build -t say-what .
+docker build -t say-what .                                  # full image with Whisper
+docker build --build-arg WITH_WHISPER=false -t say-what .   # ~1 GB smaller, captions only
 docker run -p 8000:8000 --env-file .env say-what
 ```
 
-## 🛠️ Tech Stack
+`render.yaml` is included for one-click deployment on Render.
 
-- **Backend**: FastAPI, SQLAlchemy, Python 3.11+
-- **Frontend**: Jinja2, Tailwind CSS, Alpine.js, HTMX
-- **AI**: OpenAI, Anthropic, Google Gemini APIs
-- **Vector Store**: ChromaDB
-- **Transcription**: yt-dlp, OpenAI Whisper, YouTube Transcript API
+## API
 
-## 📝 Environment Variables
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/providers` | Supported providers and models |
+| `POST` | `/api/extract` | Queue a URL for processing (re-runs previously failed URLs) |
+| `GET` | `/api/content/{id}/status` | Pipeline stage: `extracting → transcribing → summarizing → indexing → completed` |
+| `GET` | `/api/content/{id}` | Transcript, summary, key points, topics |
+| `GET` | `/api/content/{id}/chunks` | RAG chunks with timestamp deep links |
+| `GET` | `/api/content/{id}/export?format=json\|markdown` | Export |
+| `GET` | `/api/contents` | List processed content |
+| `POST` | `/api/chat` | Grounded chat message |
+| `GET`/`DELETE` | `/api/chat/history/{id}/{session}` | Read or clear chat history |
 
-```env
-# Required for demo seeding (optional for visitors)
-OPENAI_API_KEY=sk-...
-# OR
-ANTHROPIC_API_KEY=sk-ant-...
+## Project structure
 
-# App settings
-DEBUG=false
-SECRET_KEY=your-secret-key
-DATABASE_URL=sqlite:///./say_what.db
+```
+app/
+├── main.py               # App factory: logging, middleware, routers
+├── config.py             # Settings + provider/model catalog (single source of truth)
+├── models.py / schemas.py
+├── routers/              # api.py (REST), chat.py (RAG chat), web.py (Jinja2 UI)
+└── services/
+    ├── llm.py            # LLMClient: OpenAI, Anthropic, Gemini, Azure adapters
+    ├── pipeline.py       # extract → transcribe → summarize → chunk → index
+    ├── extractor.py      # yt-dlp metadata/audio, platform detection
+    ├── transcriber.py    # YouTube captions with Whisper fallback
+    ├── summarizer.py     # Structured JSON summary
+    ├── chunker.py        # Token-aware chunking with overlap
+    ├── vector_store.py   # ChromaDB, one collection per video
+    └── chat.py           # Translate → retrieve → grounded answer
+tests/                    # 61 tests: unit (chunking, LLM adapters, chat) + HTTP (TestClient)
 ```
 
-## 📄 License
+## Development
 
-MIT License - feel free to use this for your own portfolio!
+```bash
+pip install -r requirements-dev.txt
+pytest           # runs offline: LLMs, downloads and embeddings are faked
+ruff check . && ruff format --check .
+```
 
----
+CI runs lint and tests on every push and pull request.
 
-Built with ❤️ as a portfolio demonstration of full-stack AI development.
+## Limitations and next steps
+
+- **Retrieval quality is not yet measured.** The next step is a small labeled question set per demo video, reporting recall@k and answer faithfulness, so threshold and chunk-size choices are backed by numbers.
+- **Translation alignment is approximate.** Translated text is split across caption segments proportionally to length, which can drift on long segments.
+- **Rate limiting is per browser session** (signed cookie) and is easy to bypass. A real deployment would limit per IP or per account.
+- **SQLite and an in-process background task** fit a single-instance demo. Scaling out would mean Postgres plus a task queue (e.g. Celery or Arq).
+
+## License
+
+[MIT](LICENSE) © Daniel Ojeda

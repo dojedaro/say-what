@@ -1,0 +1,4 @@
+# Optional: local speech-to-text for videos without YouTube captions (TikTok, Instagram).
+# Pulls in PyTorch (~1 GB); requires FFmpeg on PATH.
+-r requirements.txt
+openai-whisper==20250625

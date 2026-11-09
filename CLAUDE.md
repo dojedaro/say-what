@@ -13,38 +13,19 @@ This is a portfolio demo showcasing:
 
 ## Architecture
 
-```
-app/
-├── main.py              # FastAPI entry point
-├── config.py            # Environment settings
-├── database.py          # SQLAlchemy setup
-├── models.py            # Database models (Content, Chunk)
-├── schemas.py           # Pydantic schemas
-├── routers/
-│   ├── api.py           # REST API endpoints
-│   ├── web.py           # Web UI routes
-│   └── chat.py          # RAG chat endpoints
-├── services/
-│   ├── extractor.py     # yt-dlp video extraction
-│   ├── transcriber.py   # Whisper + YouTube transcripts
-│   ├── summarizer.py    # Multi-provider AI summarization
-│   ├── chunker.py       # RAG-ready chunking with tiktoken
-│   ├── vector_store.py  # ChromaDB embeddings
-│   └── chat.py          # Grounded RAG chat
-└── templates/           # Jinja2 + Tailwind + HTMX
-```
+See README.md "Project structure". Key rules:
+- All model calls go through `app/services/llm.py` (`create_llm_client`); never import a provider SDK elsewhere.
+- Video processing lives only in `app/services/pipeline.py` (used by the API and `scripts/seed_demo.py`).
+- Provider/model IDs live only in `API_PROVIDERS` in `app/config.py`.
+- Blocking work (yt-dlp, Whisper, LLM calls) must run in sync `def` endpoints/tasks, not `async def`.
 
 ## Key Commands
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Run development server
+pip install -r requirements-dev.txt     # + requirements-whisper.txt for non-YouTube videos
 uvicorn app.main:app --reload
-
-# Run with specific host/port
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+pytest                                  # offline; external services are faked
+ruff check . && ruff format .
 ```
 
 ## Demo Videos (Pre-loaded)
@@ -55,10 +36,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ## API Providers Supported
 
-- OpenAI (GPT-4o, GPT-4o-mini)
-- Anthropic (Claude 3.5 Sonnet, Claude 3.5 Haiku, Claude 3 Opus)
-- Google Gemini (Gemini 1.5 Pro, Gemini 1.5 Flash)
-- Microsoft Azure OpenAI (Copilot)
+OpenAI, Anthropic (Claude Sonnet/Opus/Haiku 5.5), Google Gemini, Azure OpenAI. See `API_PROVIDERS` in `app/config.py`.
 
 ## Design Decisions
 

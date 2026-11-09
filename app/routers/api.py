@@ -1,46 +1,50 @@
 """REST API endpoints for content extraction and management."""
 
 import json
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
+import logging
+from typing import Literal
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.models import Content, Chunk
+from app.config import API_PROVIDERS, get_settings
+from app.database import get_db, get_db_context
+from app.models import Chunk, Content
 from app.schemas import (
-    ExtractionRequest,
-    ContentResponse,
-    ContentListItem,
-    ChunkResponse,
-    ProcessingStatus,
     APIProviderInfo,
+    ChunkResponse,
+    ContentListItem,
+    ContentResponse,
     ExportResponse,
+    ExtractionRequest,
+    ProcessingStatus,
 )
-from app.config import get_settings, API_PROVIDERS
-from app.services.extractor import VideoExtractor
-from app.services.transcriber import Transcriber
-from app.services.summarizer import Summarizer
-from app.services.chunker import Chunker
-from app.services.vector_store import VectorStore
+from app.services.extractor import VideoExtractor, timestamp_url
 
 router = APIRouter(prefix="/api", tags=["api"])
-settings = get_settings()
+logger = logging.getLogger(__name__)
+
+PROGRESS_MESSAGES = {
+    "pending": "Waiting to start...",
+    "extracting": "Extracting video metadata...",
+    "transcribing": "Transcribing audio...",
+    "summarizing": "Generating AI summary...",
+    "indexing": "Building search index...",
+    "completed": "Processing complete!",
+    "failed": "Processing failed",
+}
 
 
-def get_session_extraction_count(request: Request) -> int:
-    """Get the number of extractions in the current session."""
-    return request.session.get("extraction_count", 0)
-
-
-def increment_session_extraction_count(request: Request):
-    """Increment the extraction count for the current session."""
-    current = request.session.get("extraction_count", 0)
-    request.session["extraction_count"] = current + 1
+def get_content_or_404(db: Session, content_id: int) -> Content:
+    content = db.get(Content, content_id)
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found")
+    return content
 
 
 @router.get("/providers", response_model=list[APIProviderInfo])
-async def get_providers():
-    """Get list of supported API providers and their models."""
+def get_providers():
+    """Supported LLM providers and their models."""
     return [
         APIProviderInfo(
             id=provider_id,
@@ -54,61 +58,52 @@ async def get_providers():
 
 
 @router.post("/extract", response_model=ProcessingStatus)
-async def extract_content(
+def extract_content(
     request: Request,
     extraction: ExtractionRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    """
-    Submit a URL for content extraction.
+    """Queue a video URL for processing with the caller's own API key.
 
-    Requires user's API key for processing.
-    Limited to 5 extractions per session.
+    Previously failed URLs are re-processed; limited per session to deter abuse.
     """
-    # Check rate limit
-    extraction_count = get_session_extraction_count(request)
-    if extraction_count >= settings.max_extractions_per_session:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Rate limit exceeded. Maximum {settings.max_extractions_per_session} extractions per session.",
-        )
+    if not extraction.api_key.strip():
+        raise HTTPException(status_code=400, detail="API key required")
+    if extraction.provider == "azure" and not extraction.azure_endpoint:
+        raise HTTPException(status_code=400, detail="Azure endpoint required for Azure provider")
 
-    # Check if URL already processed
     existing = db.query(Content).filter(Content.url == extraction.url).first()
-    if existing:
+    if existing and existing.status != "failed":
         return ProcessingStatus(
             id=existing.id,
             status=existing.status,
             progress="Already processed" if existing.status == "completed" else "Processing",
         )
 
-    # Validate API key provided
-    if not extraction.api_key:
-        raise HTTPException(status_code=400, detail="API key required")
+    settings = get_settings()
+    extraction_count = request.session.get("extraction_count", 0)
+    if extraction_count >= settings.max_extractions_per_session:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded. Maximum {settings.max_extractions_per_session} extractions per session.",
+        )
 
-    # Create initial content record
     try:
-        extractor = VideoExtractor()
-        platform, video_id = extractor.detect_platform(extraction.url)
+        platform, video_id = VideoExtractor.detect_platform(extraction.url)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
-    content = Content(
-        url=extraction.url,
-        video_id=video_id,
-        platform=platform,
-        status="pending",
-        is_demo=False,
-    )
-    db.add(content)
+    if existing:  # retry a failed extraction in place
+        content = existing
+        content.status, content.error_message = "pending", None
+    else:
+        content = Content(url=extraction.url, video_id=video_id, platform=platform, status="pending")
+        db.add(content)
     db.commit()
     db.refresh(content)
 
-    # Increment extraction count
-    increment_session_extraction_count(request)
-
-    # Start background processing
+    request.session["extraction_count"] = extraction_count + 1
     background_tasks.add_task(
         process_content,
         content.id,
@@ -117,220 +112,79 @@ async def extract_content(
         extraction.api_key,
         extraction.azure_endpoint,
     )
-
-    return ProcessingStatus(
-        id=content.id,
-        status="pending",
-        progress="Starting extraction...",
-    )
+    return ProcessingStatus(id=content.id, status="pending", progress="Starting extraction...")
 
 
-async def process_content(
+def process_content(
     content_id: int,
     provider: str,
     model: str,
     api_key: str,
-    azure_endpoint: Optional[str] = None,
-):
-    """Background task to process content."""
-    from app.database import get_db_context
+    azure_endpoint: str | None = None,
+) -> None:
+    """Background task. Deliberately sync: Starlette runs it in a worker thread, so the
+    blocking download/transcription/LLM work never stalls the event loop."""
+    from app.services.pipeline import ContentPipeline
+    from app.services.summarizer import Summarizer
 
     with get_db_context() as db:
-        content = db.query(Content).filter(Content.id == content_id).first()
+        content = db.get(Content, content_id)
         if not content:
             return
-
         try:
-            # Update status
-            content.status = "extracting"
-            db.commit()
-
-            # Extract metadata
-            extractor = VideoExtractor()
-            metadata = extractor.extract_metadata(content.url)
-
-            content.title = metadata.title
-            content.author = metadata.author
-            content.duration = metadata.duration
-            content.views = metadata.views
-            content.thumbnail_url = metadata.thumbnail_url
-            db.commit()
-
-            # Transcribe
-            content.status = "transcribing"
-            db.commit()
-
-            transcriber = Transcriber()
-            audio_path = None
-
-            # For non-YouTube or if YouTube transcript fails, download audio
-            if metadata.platform != "youtube":
-                audio_path = extractor.download_audio(content.url)
-
-            try:
-                result = transcriber.transcribe(
-                    url=content.url,
-                    video_id=metadata.video_id,
-                    platform=metadata.platform,
-                    audio_path=audio_path,
-                )
-            finally:
-                if audio_path:
-                    extractor.cleanup_audio(audio_path)
-
-            content.original_transcript = result.original_text
-            content.translated_transcript = result.translated_text
-            content.transcript_with_timestamps = transcriber.segments_to_json(result.segments)
-            content.detected_language = result.detected_language
-            db.commit()
-
-            # Summarize
-            content.status = "summarizing"
-            db.commit()
-
-            # Use English transcript for summarization
-            text_for_summary = result.translated_text or result.original_text
-
             summarizer = Summarizer.create(provider, api_key, model, azure_endpoint)
-            summary_result = summarizer.summarize(text_for_summary)
-
-            content.summary = summary_result.summary
-            content.key_points = json.dumps(summary_result.key_points)
-            content.topics = json.dumps(summary_result.topics)
-            content.summary_tokens = summary_result.tokens_used
-            db.commit()
-
-            # Chunk for RAG
-            chunker = Chunker()
-            timestamps = json.loads(content.transcript_with_timestamps) if content.transcript_with_timestamps else None
-
-            chunks = chunker.chunk_text(
-                text=result.original_text,
-                text_english=result.translated_text,
-                timestamps=timestamps,
-            )
-
-            content.transcript_tokens = sum(c.token_count for c in chunks)
-
-            # Save chunks to database
-            for chunk in chunks:
-                db_chunk = Chunk(
-                    content_id=content.id,
-                    chunk_index=chunk.index,
-                    text=chunk.text,
-                    text_english=chunk.text_english,
-                    token_count=chunk.token_count,
-                    start_time=chunk.start_time,
-                    end_time=chunk.end_time,
-                )
-                db.add(db_chunk)
-
-            db.commit()
-
-            # Add to vector store
-            vector_store = VectorStore()
-            chunk_dicts = [
-                {
-                    "index": c.index,
-                    "text": c.text,
-                    "text_english": c.text_english,
-                    "token_count": c.token_count,
-                    "start_time": c.start_time,
-                    "end_time": c.end_time,
-                }
-                for c in chunks
-            ]
-            vector_store.add_chunks(content.id, chunk_dicts)
-
-            # Done!
-            content.status = "completed"
-            db.commit()
-
-        except Exception as e:
-            content.status = "failed"
-            content.error_message = str(e)
-            db.commit()
-            raise
+            ContentPipeline().run(db, content, summarizer)
+        except Exception as exc:
+            # The pipeline already logged and recorded the failure on the row.
+            if content.status != "failed":
+                logger.exception("Could not start processing for content %s", content_id)
+                content.status, content.error_message = "failed", str(exc)
 
 
 @router.get("/content/{content_id}", response_model=ContentResponse)
-async def get_content(content_id: int, db: Session = Depends(get_db)):
-    """Get processed content by ID."""
-    content = db.query(Content).filter(Content.id == content_id).first()
-    if not content:
-        raise HTTPException(status_code=404, detail="Content not found")
-
-    response = ContentResponse.model_validate(content)
-
-    # Parse JSON fields
-    if content.key_points:
-        response.key_points = json.loads(content.key_points)
-    if content.topics:
-        response.topics = json.loads(content.topics)
-
-    return response
+def get_content(content_id: int, db: Session = Depends(get_db)):
+    """Processed content by ID."""
+    return ContentResponse.model_validate(get_content_or_404(db, content_id))
 
 
 @router.get("/content/{content_id}/status", response_model=ProcessingStatus)
-async def get_content_status(content_id: int, db: Session = Depends(get_db)):
-    """Get processing status for content."""
-    content = db.query(Content).filter(Content.id == content_id).first()
-    if not content:
-        raise HTTPException(status_code=404, detail="Content not found")
-
-    progress_messages = {
-        "pending": "Waiting to start...",
-        "extracting": "Extracting video metadata...",
-        "transcribing": "Transcribing audio...",
-        "summarizing": "Generating AI summary...",
-        "completed": "Processing complete!",
-        "failed": "Processing failed",
-    }
-
+def get_content_status(content_id: int, db: Session = Depends(get_db)):
+    """Processing status, polled by the UI."""
+    content = get_content_or_404(db, content_id)
     return ProcessingStatus(
         id=content.id,
         status=content.status,
-        progress=progress_messages.get(content.status, "Processing..."),
+        progress=PROGRESS_MESSAGES.get(content.status, "Processing..."),
         error=content.error_message if content.status == "failed" else None,
     )
 
 
 @router.get("/content/{content_id}/chunks", response_model=list[ChunkResponse])
-async def get_content_chunks(content_id: int, db: Session = Depends(get_db)):
-    """Get RAG-ready chunks for content."""
-    content = db.query(Content).filter(Content.id == content_id).first()
-    if not content:
-        raise HTTPException(status_code=404, detail="Content not found")
-
+def get_content_chunks(content_id: int, db: Session = Depends(get_db)):
+    """RAG-ready chunks for content, with deep links where available."""
+    content = get_content_or_404(db, content_id)
     chunks = db.query(Chunk).filter(Chunk.content_id == content_id).order_by(Chunk.chunk_index).all()
 
     result = []
     for chunk in chunks:
         response = ChunkResponse.model_validate(chunk)
-
-        # Add timestamp link for YouTube
-        if content.platform == "youtube" and chunk.start_time:
-            response.timestamp_link = f"https://www.youtube.com/watch?v={content.video_id}&t={int(chunk.start_time)}s"
-
+        response.timestamp_link = timestamp_url(content.platform, content.video_id, chunk.start_time)
         result.append(response)
-
     return result
 
 
-@router.get("/content/{content_id}/export")
-async def export_content(
+@router.get("/content/{content_id}/export", response_model=ExportResponse)
+def export_content(
     content_id: int,
-    format: str = "json",
+    format: Literal["json", "markdown"] = "json",
     db: Session = Depends(get_db),
 ):
-    """Export content in various formats."""
-    content = db.query(Content).filter(Content.id == content_id).first()
-    if not content:
-        raise HTTPException(status_code=404, detail="Content not found")
-
-    chunks = db.query(Chunk).filter(Chunk.content_id == content_id).order_by(Chunk.chunk_index).all()
+    """Export content as JSON or Markdown."""
+    content = get_content_or_404(db, content_id)
+    key_points = json.loads(content.key_points) if content.key_points else []
 
     if format == "json":
+        chunks = db.query(Chunk).filter(Chunk.content_id == content_id).order_by(Chunk.chunk_index).all()
         export_data = {
             "metadata": {
                 "title": content.title,
@@ -345,7 +199,7 @@ async def export_content(
                 "translated": content.translated_transcript,
             },
             "summary": content.summary,
-            "key_points": json.loads(content.key_points) if content.key_points else [],
+            "key_points": key_points,
             "topics": json.loads(content.topics) if content.topics else [],
             "chunks": [
                 {
@@ -365,65 +219,47 @@ async def export_content(
             content=json.dumps(export_data, indent=2, ensure_ascii=False),
         )
 
-    elif format == "markdown":
-        md_lines = [
-            f"# {content.title}",
-            f"",
-            f"**Author:** {content.author}",
-            f"**Platform:** {content.platform}",
-            f"**URL:** {content.url}",
-            f"**Language:** {content.detected_language}",
-            f"",
-            f"## Summary",
-            f"",
-            content.summary or "No summary available.",
-            f"",
-            f"## Key Points",
-            f"",
-        ]
+    md_lines = [
+        f"# {content.title}",
+        "",
+        f"**Author:** {content.author}",
+        f"**Platform:** {content.platform}",
+        f"**URL:** {content.url}",
+        f"**Language:** {content.detected_language}",
+        "",
+        "## Summary",
+        "",
+        content.summary or "No summary available.",
+        "",
+        "## Key Points",
+        "",
+        *(f"- {point}" for point in key_points),
+        "",
+        "## Transcript",
+        "",
+        content.translated_transcript or content.original_transcript or "No transcript available.",
+        "",
+    ]
+    if content.detected_language != "en" and content.original_transcript:
+        md_lines += [f"## Original Transcript ({content.detected_language})", "", content.original_transcript]
 
-        key_points = json.loads(content.key_points) if content.key_points else []
-        for point in key_points:
-            md_lines.append(f"- {point}")
-
-        md_lines.extend([
-            f"",
-            f"## Transcript",
-            f"",
-            content.translated_transcript or content.original_transcript or "No transcript available.",
-            f"",
-        ])
-
-        if content.detected_language != "en" and content.original_transcript:
-            md_lines.extend([
-                f"## Original Transcript ({content.detected_language})",
-                f"",
-                content.original_transcript,
-            ])
-
-        return ExportResponse(
-            format="markdown",
-            filename=f"{content.video_id}_export.md",
-            content="\n".join(md_lines),
-        )
-
-    else:
-        raise HTTPException(status_code=400, detail=f"Unsupported format: {format}")
+    return ExportResponse(
+        format="markdown",
+        filename=f"{content.video_id}_export.md",
+        content="\n".join(md_lines),
+    )
 
 
 @router.get("/contents", response_model=list[ContentListItem])
-async def list_contents(
+def list_contents(
     skip: int = 0,
     limit: int = 20,
     demo_only: bool = False,
     db: Session = Depends(get_db),
 ):
-    """List all processed content."""
+    """List processed content, newest first."""
     query = db.query(Content)
-
     if demo_only:
-        query = query.filter(Content.is_demo == True)
-
-    contents = query.order_by(Content.created_at.desc()).offset(skip).limit(limit).all()
-
+        query = query.filter(Content.is_demo.is_(True))
+    contents = query.order_by(Content.created_at.desc()).offset(skip).limit(min(limit, 100)).all()
     return [ContentListItem.model_validate(c) for c in contents]

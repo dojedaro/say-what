@@ -1,8 +1,9 @@
 """SQLAlchemy database models."""
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Float, Boolean
-from sqlalchemy.orm import relationship, declarative_base
+
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 

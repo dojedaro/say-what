@@ -1,28 +1,35 @@
 """Configuration settings for Say What? platform."""
 
-import os
 from functools import lru_cache
-from pydantic_settings import BaseSettings
-from typing import Optional
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+INSECURE_DEFAULT_SECRET = "change-this-in-production"
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+    """Application settings loaded from environment variables / .env."""
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # App settings
     app_name: str = "Say What? · ¿Qué dijiste? · 뭐라고요?"
     debug: bool = False
-    secret_key: str = "change-this-in-production"
+    secret_key: str = INSECURE_DEFAULT_SECRET
 
-    # Database
+    # Storage
     database_url: str = "sqlite:///./say_what.db"
+    chroma_dir: str = "./chroma_data"
+    temp_dir: str = "./temp"
 
-    # API Keys (for seeding demo content - optional)
-    openai_api_key: Optional[str] = None
-    anthropic_api_key: Optional[str] = None
-    google_api_key: Optional[str] = None
+    # Server-side API keys (used for demo content and seeding - optional)
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
+    google_api_key: str | None = None
 
-    # Whisper settings
+    # Whisper settings (optional dependency, see requirements-whisper.txt)
     whisper_model: str = "base"  # tiny, base, small, medium, large
 
     # Chunking settings
@@ -32,20 +39,9 @@ class Settings(BaseSettings):
     # Rate limiting
     max_extractions_per_session: int = 5
 
-    # Temp directory for audio files
-    temp_dir: str = "./temp"
-
     # Supported languages
-    supported_languages: list = ["en", "es", "ko"]
-    language_names: dict = {
-        "en": "English",
-        "es": "Español",
-        "ko": "한국어"
-    }
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    supported_languages: list[str] = ["en", "es", "ko"]
+    language_names: dict[str, str] = {"en": "English", "es": "Español", "ko": "한국어"}
 
 
 @lru_cache
@@ -54,46 +50,67 @@ def get_settings() -> Settings:
     return Settings()
 
 
-# API Provider configurations
+# Provider catalog: the first model listed is the default for that provider.
+# Model IDs were checked against each provider's SDK/docs in Nov 2026; update here only.
 API_PROVIDERS = {
     "openai": {
         "name": "OpenAI",
         "models": {
-            "gpt-4o": "GPT-4o (Recommended)",
-            "gpt-4o-mini": "GPT-4o Mini (Faster & Cheaper)",
+            "gpt-6.1-sol": "GPT-6.1 Sol",
+            "gpt-6.1-terra": "GPT-6.1 Terra",
+            "gpt-6-luna": "GPT-6 Luna",
         },
-        "key_prefix": "sk-",
         "key_placeholder": "sk-...",
     },
     "anthropic": {
         "name": "Anthropic",
         "models": {
-            "claude-3-5-sonnet-20241022": "Claude 3.5 Sonnet (Recommended)",
-            "claude-3-5-haiku-20241022": "Claude 3.5 Haiku (Faster & Cheaper)",
-            "claude-3-opus-20240229": "Claude 3 Opus (Most Capable)",
+            "claude-sonnet-5-5": "Claude Sonnet 5.5 (Recommended)",
+            "claude-opus-5-5": "Claude Opus 5.5 (Most Capable)",
+            "claude-haiku-5-5": "Claude Haiku 5.5 (Fastest & Cheapest)",
         },
-        "key_prefix": "sk-ant-",
         "key_placeholder": "sk-ant-...",
     },
     "google": {
         "name": "Google Gemini",
         "models": {
-            "gemini-1.5-pro": "Gemini 1.5 Pro (Recommended)",
-            "gemini-1.5-flash": "Gemini 1.5 Flash (Faster & Cheaper)",
+            "gemini-3.5-flash": "Gemini 3.5 Flash",
+            "gemini-3.5-flash-lite": "Gemini 3.5 Flash-Lite (Faster & Cheaper)",
         },
-        "key_prefix": "AI",
         "key_placeholder": "AI...",
     },
     "azure": {
-        "name": "Microsoft Copilot (Azure)",
+        "name": "Microsoft Azure OpenAI",
         "models": {
-            "gpt-4o": "GPT-4o via Azure",
+            "gpt-6.1-sol": "GPT-6.1 Sol (your deployment must use this name)",
         },
-        "key_prefix": "",
         "key_placeholder": "Your Azure API key",
         "requires_endpoint": True,
     },
 }
+
+DEFAULT_MODELS = {provider: next(iter(info["models"])) for provider, info in API_PROVIDERS.items()}
+
+# Cheaper models for server-paid demo traffic (seeding + chat on pre-loaded videos).
+SERVER_DEMO_MODELS = {
+    "openai": DEFAULT_MODELS["openai"],
+    "anthropic": "claude-haiku-5-5",
+    "google": "gemini-3.5-flash-lite",
+}
+
+
+def server_llm_config(settings: Settings | None = None) -> dict | None:
+    """Provider/model/key for server-paid calls, from whichever key is configured."""
+    settings = settings or get_settings()
+    for provider, key in (
+        ("openai", settings.openai_api_key),
+        ("anthropic", settings.anthropic_api_key),
+        ("google", settings.google_api_key),
+    ):
+        if key:
+            return {"provider": provider, "model": SERVER_DEMO_MODELS[provider], "api_key": key}
+    return None
+
 
 # Demo videos configuration
 DEMO_VIDEOS = [

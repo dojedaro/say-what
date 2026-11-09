@@ -1,9 +1,10 @@
 """Database configuration and session management."""
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generator
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
 from app.models import Base
