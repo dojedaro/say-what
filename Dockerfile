@@ -1,36 +1,34 @@
-# Dockerfile for Say What?
-
 FROM python:3.11-slim
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
 
-# Install system dependencies including FFmpeg for audio processing
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    gcc \
+# FFmpeg is needed by yt-dlp/Whisper to extract audio from non-YouTube videos
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Set work directory
 WORKDIR /app
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies first so code changes don't invalidate this layer.
+# Includes Whisper (PyTorch); build with --build-arg WITH_WHISPER=false for a ~1 GB smaller image
+# that only supports videos with YouTube captions.
+ARG WITH_WHISPER=true
+COPY requirements.txt requirements-whisper.txt ./
+RUN if [ "$WITH_WHISPER" = "true" ]; then pip install -r requirements-whisper.txt; else pip install -r requirements.txt; fi
 
-# Copy application code
-COPY . .
+COPY app ./app
+COPY static ./static
+COPY scripts ./scripts
 
-# Create necessary directories
-RUN mkdir -p temp chroma_data static/css
+RUN useradd --create-home appuser && mkdir -p data temp chroma_data && chown -R appuser /app
+USER appuser
 
-# Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+# python:3.11-slim has no curl, so probe with the standard library
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
-# Run the application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

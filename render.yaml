@@ -5,11 +5,11 @@ services:
   - type: web
     name: say-what
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements-whisper.txt  # use requirements.txt to skip Whisper on small instances
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
-        value: "3.11.7"
+        value: "3.11.11"
       - key: SECRET_KEY
         generateValue: true
       - key: DATABASE_URL
@@ -20,6 +20,8 @@ services:
       - key: OPENAI_API_KEY
         sync: false
       - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
         sync: false
     healthCheckPath: /health
     autoDeploy: true
