@@ -1,201 +1,62 @@
 #!/usr/bin/env python3
-"""Seed the database with pre-processed demo content."""
+"""Seed the database with the pre-processed demo videos.
 
+Usage: python scripts/seed_demo.py   (needs OPENAI_API_KEY, ANTHROPIC_API_KEY or GOOGLE_API_KEY in .env)
+"""
+
+import logging
 import sys
-import os
-import json
+from pathlib import Path
 
-# Fix Windows console encoding for emojis
-if sys.platform == "win32":
-    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# Add parent directory to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from app.config import DEMO_VIDEOS, server_llm_config  # noqa: E402
+from app.database import get_db_context, init_db  # noqa: E402
+from app.models import Content  # noqa: E402
+from app.services.extractor import VideoExtractor  # noqa: E402
+from app.services.pipeline import ContentPipeline  # noqa: E402
+from app.services.summarizer import Summarizer  # noqa: E402
 
-from app.config import get_settings, DEMO_VIDEOS
-from app.database import init_db, get_db_context
-from app.models import Content, Chunk
-from app.services.extractor import VideoExtractor
-from app.services.transcriber import Transcriber
-from app.services.summarizer import Summarizer
-from app.services.chunker import Chunker
-from app.services.vector_store import VectorStore
-
-settings = get_settings()
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+logger = logging.getLogger("seed_demo")
 
 
-def get_api_config():
-    """Get API configuration from environment."""
-    if settings.openai_api_key:
-        return {
-            "provider": "openai",
-            "model": "gpt-4o-mini",
-            "api_key": settings.openai_api_key,
-        }
-    elif settings.anthropic_api_key:
-        return {
-            "provider": "anthropic",
-            "model": "claude-3-5-haiku-20241022",
-            "api_key": settings.anthropic_api_key,
-        }
-    else:
-        raise ValueError("No API key found. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in .env")
+def seed_demo_content() -> int:
+    """Process every demo video not already stored. Returns the number of failures."""
+    config = server_llm_config()
+    if config is None:
+        logger.error("No API key found. Set OPENAI_API_KEY, ANTHROPIC_API_KEY or GOOGLE_API_KEY in .env")
+        return 1
+    logger.info("Using %s / %s", config["provider"], config["model"])
 
-
-def seed_demo_content():
-    """Seed all demo videos into the database."""
-    print("🎬 Say What? Demo Seeder")
-    print("=" * 50)
-
-    # Initialize database
     init_db()
-
-    # Get API config
-    try:
-        api_config = get_api_config()
-        print(f"✅ Using {api_config['provider']} with {api_config['model']}")
-    except ValueError as e:
-        print(f"❌ {e}")
-        return
-
-    # Initialize services
-    extractor = VideoExtractor()
-    transcriber = Transcriber()
-    chunker = Chunker()
-    vector_store = VectorStore()
+    summarizer = Summarizer.create(config["provider"], config["api_key"], config["model"])
+    pipeline = ContentPipeline()
+    failures = 0
 
     with get_db_context() as db:
         for i, video in enumerate(DEMO_VIDEOS, 1):
-            print(f"\n[{i}/{len(DEMO_VIDEOS)}] Processing: {video['title']}")
-            print(f"    URL: {video['url']}")
+            logger.info("[%d/%d] %s (%s)", i, len(DEMO_VIDEOS), video["title"], video["url"])
 
-            # Check if already exists
-            existing = db.query(Content).filter(Content.url == video["url"]).first()
-            if existing:
-                print(f"    ⏭️  Already exists (ID: {existing.id})")
+            content = db.query(Content).filter(Content.url == video["url"]).first()
+            if content and content.status == "completed":
+                logger.info("    already processed (id=%s), skipping", content.id)
                 continue
-
-            try:
-                # Extract metadata
-                print("    📥 Extracting metadata...")
-                metadata = extractor.extract_metadata(video["url"])
-
-                # Create content record
-                content = Content(
-                    url=video["url"],
-                    video_id=metadata.video_id,
-                    platform=metadata.platform,
-                    status="processing",
-                    is_demo=True,
-                    title=metadata.title,
-                    author=metadata.author,
-                    duration=metadata.duration,
-                    views=metadata.views,
-                    thumbnail_url=metadata.thumbnail_url,
-                )
+            if content is None:
+                platform, video_id = VideoExtractor.detect_platform(video["url"])
+                content = Content(url=video["url"], platform=platform, video_id=video_id, is_demo=True)
                 db.add(content)
                 db.commit()
-                db.refresh(content)
 
-                # Transcribe
-                print("    📝 Transcribing...")
-                audio_path = None
+            try:
+                pipeline.run(db, content, summarizer)
+                logger.info("    done (id=%s)", content.id)
+            except Exception:
+                failures += 1  # already logged and recorded by the pipeline
 
-                if metadata.platform != "youtube":
-                    audio_path = extractor.download_audio(video["url"])
-
-                try:
-                    result = transcriber.transcribe(
-                        url=video["url"],
-                        video_id=metadata.video_id,
-                        platform=metadata.platform,
-                        audio_path=audio_path,
-                    )
-                finally:
-                    if audio_path:
-                        extractor.cleanup_audio(audio_path)
-
-                content.original_transcript = result.original_text
-                content.translated_transcript = result.translated_text
-                content.transcript_with_timestamps = transcriber.segments_to_json(result.segments)
-                content.detected_language = result.detected_language
-                db.commit()
-
-                print(f"    🌐 Detected language: {result.detected_language}")
-
-                # Summarize
-                print("    🤖 Generating summary...")
-                text_for_summary = result.translated_text or result.original_text
-
-                summarizer = Summarizer.create(
-                    api_config["provider"],
-                    api_config["api_key"],
-                    api_config["model"],
-                )
-                summary_result = summarizer.summarize(text_for_summary)
-
-                content.summary = summary_result.summary
-                content.key_points = json.dumps(summary_result.key_points)
-                content.topics = json.dumps(summary_result.topics)
-                content.summary_tokens = summary_result.tokens_used
-                db.commit()
-
-                # Chunk for RAG
-                print("    📦 Creating chunks...")
-                timestamps = json.loads(content.transcript_with_timestamps) if content.transcript_with_timestamps else None
-
-                chunks = chunker.chunk_text(
-                    text=result.original_text,
-                    text_english=result.translated_text,
-                    timestamps=timestamps,
-                )
-
-                content.transcript_tokens = sum(c.token_count for c in chunks)
-
-                # Save chunks to database
-                for chunk in chunks:
-                    db_chunk = Chunk(
-                        content_id=content.id,
-                        chunk_index=chunk.index,
-                        text=chunk.text,
-                        text_english=chunk.text_english,
-                        token_count=chunk.token_count,
-                        start_time=chunk.start_time,
-                        end_time=chunk.end_time,
-                    )
-                    db.add(db_chunk)
-
-                db.commit()
-
-                # Add to vector store
-                print("    🔍 Building vector index...")
-                chunk_dicts = [
-                    {
-                        "index": c.index,
-                        "text": c.text,
-                        "text_english": c.text_english,
-                        "token_count": c.token_count,
-                        "start_time": c.start_time,
-                        "end_time": c.end_time,
-                    }
-                    for c in chunks
-                ]
-                vector_store.add_chunks(content.id, chunk_dicts)
-
-                # Mark as completed
-                content.status = "completed"
-                db.commit()
-
-                print(f"    ✅ Done! (ID: {content.id}, {len(chunks)} chunks)")
-
-            except Exception as e:
-                print(f"    ❌ Error: {e}")
-                db.rollback()
-                continue
-
-    print("\n" + "=" * 50)
-    print("🎉 Demo seeding complete!")
+    logger.info("Demo seeding complete with %d failure(s)", failures)
+    return failures
 
 
 if __name__ == "__main__":
-    seed_demo_content()
+    sys.exit(1 if seed_demo_content() else 0)

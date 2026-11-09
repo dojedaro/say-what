@@ -1,145 +1,141 @@
 """Pydantic schemas for request/response validation."""
 
+import json
 from datetime import datetime
-from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+Provider = Literal["openai", "anthropic", "google", "azure"]
+Language = Literal["en", "es", "ko"]
 
 
 # ============== Request Schemas ==============
 
+
 class ExtractionRequest(BaseModel):
     """Request schema for content extraction."""
-    url: str = Field(..., description="URL of the video to extract")
-    provider: str = Field(..., description="API provider: openai, anthropic, google, azure")
-    model: str = Field(..., description="Model to use for summarization")
-    api_key: str = Field(..., description="User's API key")
-    azure_endpoint: Optional[str] = Field(None, description="Azure endpoint (required for Azure)")
+
+    url: str = Field(..., max_length=500, description="URL of the video to extract")
+    provider: Provider = Field(..., description="LLM provider used for summarization")
+    model: str = Field(..., min_length=1, max_length=100, description="Model to use for summarization")
+    api_key: str = Field(..., description="User's API key (used for this request only, never stored)")
+    azure_endpoint: str | None = Field(None, description="Azure endpoint (required for Azure)")
 
 
 class ChatRequest(BaseModel):
     """Request schema for RAG chat."""
-    content_id: int = Field(..., description="Content ID to chat about")
-    message: str = Field(..., description="User's message")
-    language: str = Field(default="en", description="Response language: en, es, ko")
-    session_id: str = Field(..., description="Session ID for chat history")
 
-    # Optional: user's API key for non-demo content
-    provider: Optional[str] = None
-    model: Optional[str] = None
-    api_key: Optional[str] = None
+    content_id: int
+    message: str = Field(..., min_length=1, max_length=2000)
+    language: Language = "en"
+    session_id: str = Field(..., max_length=100)
+
+    # User's own credentials; required unless the server has a key for demo content.
+    provider: Provider | None = None
+    model: str | None = Field(None, max_length=100)
+    api_key: str | None = None
+    azure_endpoint: str | None = None
 
 
 # ============== Response Schemas ==============
 
+
 class ChunkResponse(BaseModel):
-    """Response schema for a single chunk."""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     chunk_index: int
     text: str
-    text_english: Optional[str]
-    token_count: Optional[int]
-    start_time: Optional[float]
-    end_time: Optional[float]
-
-    # Computed fields
-    timestamp_link: Optional[str] = None
-
-    class Config:
-        from_attributes = True
+    text_english: str | None
+    token_count: int | None
+    start_time: float | None
+    end_time: float | None
+    timestamp_link: str | None = None
 
 
 class ContentResponse(BaseModel):
-    """Response schema for processed content."""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     url: str
-    video_id: Optional[str]
+    video_id: str | None
     platform: str
     status: str
     is_demo: bool
 
-    # Metadata
-    title: Optional[str]
-    author: Optional[str]
-    duration: Optional[int]
-    views: Optional[int]
-    thumbnail_url: Optional[str]
+    title: str | None
+    author: str | None
+    duration: int | None
+    views: int | None
+    thumbnail_url: str | None
 
-    # Language
-    detected_language: Optional[str]
+    detected_language: str | None
 
-    # Transcripts
-    original_transcript: Optional[str]
-    translated_transcript: Optional[str]
+    original_transcript: str | None
+    translated_transcript: str | None
 
-    # AI Content
-    summary: Optional[str]
-    key_points: Optional[list[str]] = None
-    topics: Optional[list[str]] = None
+    summary: str | None
+    key_points: list[str] | None = None
+    topics: list[str] | None = None
 
-    # Token counts
-    transcript_tokens: Optional[int]
-    summary_tokens: Optional[int]
+    transcript_tokens: int | None
+    summary_tokens: int | None
 
-    # Timestamps
     created_at: datetime
     updated_at: datetime
 
-    # Error info
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
-    class Config:
-        from_attributes = True
+    @field_validator("key_points", "topics", mode="before")
+    @classmethod
+    def _decode_json_list(cls, value):
+        # Stored as JSON text in SQLite; decode transparently.
+        return json.loads(value) if isinstance(value, str) else value
 
 
 class ContentListItem(BaseModel):
-    """Simplified content item for list views."""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     url: str
-    video_id: Optional[str]
+    video_id: str | None
     platform: str
     status: str
     is_demo: bool
-    title: Optional[str]
-    author: Optional[str]
-    thumbnail_url: Optional[str]
-    duration: Optional[int]
-    detected_language: Optional[str]
+    title: str | None
+    author: str | None
+    thumbnail_url: str | None
+    duration: int | None
+    detected_language: str | None
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class ChatMessageResponse(BaseModel):
-    """Response schema for a chat message."""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     role: str
     message: str
-    language: Optional[str]
-    source_chunks: Optional[list[int]] = None
-    confidence_score: Optional[float]
+    language: str | None
+    source_chunks: list[int] | None = None
+    confidence_score: float | None
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class ChatResponse(BaseModel):
-    """Response schema for chat endpoint."""
     message: ChatMessageResponse
     sources: list[ChunkResponse] = []
 
 
 class ProcessingStatus(BaseModel):
-    """Response for processing status check."""
     id: int
     status: str
-    progress: Optional[str] = None
-    error: Optional[str] = None
+    progress: str | None = None
+    error: str | None = None
 
 
 class APIProviderInfo(BaseModel):
-    """Information about an API provider."""
     id: str
     name: str
     models: dict[str, str]
@@ -148,7 +144,6 @@ class APIProviderInfo(BaseModel):
 
 
 class ExportResponse(BaseModel):
-    """Response for content export."""
     format: str
     filename: str
     content: str

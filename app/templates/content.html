@@ -268,6 +268,13 @@
                             placeholder="Enter API key"
                             class="flex-1 min-w-48 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm"
                         >
+                        <input
+                            type="url"
+                            x-show="chatProvider === 'azure'"
+                            x-model="chatAzureEndpoint"
+                            placeholder="https://your-resource.openai.azure.com"
+                            class="flex-1 min-w-48 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm"
+                        >
                     </div>
                 </div>
                 {% endif %}
@@ -400,6 +407,7 @@ function contentApp() {
         isChatLoading: false,
         chatProvider: 'openai',
         chatApiKey: '',
+        chatAzureEndpoint: '',
 
         init() {
             this.loadChatHistory();
@@ -454,7 +462,8 @@ function contentApp() {
                         session_id: this.sessionId,
                         provider: this.chatProvider,
                         model: this.getDefaultModel(),
-                        api_key: this.chatApiKey || null
+                        api_key: this.chatApiKey || null,
+                        azure_endpoint: this.chatAzureEndpoint || null
                     })
                 });
 
@@ -483,13 +492,9 @@ function contentApp() {
         },
 
         getDefaultModel() {
-            const defaults = {
-                'openai': 'gpt-4o-mini',
-                'anthropic': 'claude-3-5-haiku-20241022',
-                'google': 'gemini-1.5-flash',
-                'azure': 'gpt-4o'
-            };
-            return defaults[this.chatProvider] || 'gpt-4o-mini';
+            // Single source of truth: the provider catalog in app/config.py
+            const defaults = {{ default_models | tojson }};
+            return defaults[this.chatProvider];
         },
 
         scrollChatToBottom() {
