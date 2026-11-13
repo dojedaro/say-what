@@ -49,6 +49,24 @@ flowchart LR
 | **Blocking work runs in worker threads** | Whisper, yt-dlp and LLM calls are synchronous. The background task and chat endpoint are plain `def`, so FastAPI runs them in a threadpool and the event loop stays responsive. |
 | **Whisper is an optional dependency** | It pulls in PyTorch (~1 GB). Without it, the app still handles any video with YouTube captions. |
 
+## Stack
+
+| Layer | Built with |
+|---|---|
+| API and web | FastAPI, Uvicorn, Jinja2 templates, signed session cookies |
+| Video and transcripts | yt-dlp, youtube-transcript-api, optional OpenAI Whisper |
+| LLMs | OpenAI, Anthropic Claude, Google Gemini and Azure OpenAI behind one `LLMClient` |
+| Retrieval | ChromaDB, tiktoken-based chunking |
+| Data and settings | SQLAlchemy (SQLite), Pydantic Settings |
+| Quality | pytest, GitHub Actions, Docker, Render blueprint |
+
+## Results so far
+
+- **61 tests pass in about 7 seconds** with a fake LLM and retriever, so no API keys are needed. They
+  cover the API, chat service, chunker, extractor and the LLM provider adapters.
+- **Retrieval quality isn't measured yet**, so this README makes no accuracy claim. The plan is in
+  [Limitations and next steps](#limitations-and-next-steps).
+
 ## Quick start
 
 ```bash
