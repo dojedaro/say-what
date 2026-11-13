@@ -175,3 +175,9 @@ def test_web_pages_render(client, db):
     assert page.status_code == 200
     assert "claude-sonnet-5-5" in page.text  # model defaults injected from config
     assert client.get("/content/999").status_code == 404
+
+
+def test_list_contents_rejects_out_of_range_paging(client):
+    for params in ({"skip": -1}, {"limit": 0}, {"limit": 101}):
+        assert client.get("/api/contents", params=params).status_code == 422
+    assert client.get("/api/contents", params={"skip": 0, "limit": 100}).status_code == 200

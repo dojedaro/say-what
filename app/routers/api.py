@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.config import API_PROVIDERS, get_settings
@@ -159,14 +159,16 @@ def get_content_status(content_id: int, db: Session = Depends(get_db)):
     )
 
 
+def _chunks_for(db: Session, content_id: int) -> list[Chunk]:
+    return db.query(Chunk).filter(Chunk.content_id == content_id).order_by(Chunk.chunk_index).all()
+
+
 @router.get("/content/{content_id}/chunks", response_model=list[ChunkResponse])
 def get_content_chunks(content_id: int, db: Session = Depends(get_db)):
     """RAG-ready chunks for content, with deep links where available."""
     content = get_content_or_404(db, content_id)
-    chunks = db.query(Chunk).filter(Chunk.content_id == content_id).order_by(Chunk.chunk_index).all()
-
     result = []
-    for chunk in chunks:
+    for chunk in _chunks_for(db, content_id):
         response = ChunkResponse.model_validate(chunk)
         response.timestamp_link = timestamp_url(content.platform, content.video_id, chunk.start_time)
         result.append(response)
@@ -179,46 +181,51 @@ def export_content(
     format: Literal["json", "markdown"] = "json",
     db: Session = Depends(get_db),
 ):
-    """Export content as JSON or Markdown."""
+    """Export content as JSON (including RAG-ready chunks) or Markdown."""
     content = get_content_or_404(db, content_id)
     key_points = json.loads(content.key_points) if content.key_points else []
-
     if format == "json":
-        chunks = db.query(Chunk).filter(Chunk.content_id == content_id).order_by(Chunk.chunk_index).all()
-        export_data = {
-            "metadata": {
-                "title": content.title,
-                "author": content.author,
-                "platform": content.platform,
-                "url": content.url,
-                "duration": content.duration,
-                "language": content.detected_language,
-            },
-            "transcript": {
-                "original": content.original_transcript,
-                "translated": content.translated_transcript,
-            },
-            "summary": content.summary,
-            "key_points": key_points,
-            "topics": json.loads(content.topics) if content.topics else [],
-            "chunks": [
-                {
-                    "index": c.chunk_index,
-                    "text": c.text,
-                    "text_english": c.text_english,
-                    "start_time": c.start_time,
-                    "end_time": c.end_time,
-                    "token_count": c.token_count,
-                }
-                for c in chunks
-            ],
-        }
-        return ExportResponse(
-            format="json",
-            filename=f"{content.video_id}_export.json",
-            content=json.dumps(export_data, indent=2, ensure_ascii=False),
-        )
+        return _export_json(content, key_points, _chunks_for(db, content_id))
+    return _export_markdown(content, key_points)
 
+
+def _export_json(content: Content, key_points: list[str], chunks: list[Chunk]) -> ExportResponse:
+    export_data = {
+        "metadata": {
+            "title": content.title,
+            "author": content.author,
+            "platform": content.platform,
+            "url": content.url,
+            "duration": content.duration,
+            "language": content.detected_language,
+        },
+        "transcript": {
+            "original": content.original_transcript,
+            "translated": content.translated_transcript,
+        },
+        "summary": content.summary,
+        "key_points": key_points,
+        "topics": json.loads(content.topics) if content.topics else [],
+        "chunks": [
+            {
+                "index": c.chunk_index,
+                "text": c.text,
+                "text_english": c.text_english,
+                "start_time": c.start_time,
+                "end_time": c.end_time,
+                "token_count": c.token_count,
+            }
+            for c in chunks
+        ],
+    }
+    return ExportResponse(
+        format="json",
+        filename=f"{content.video_id}_export.json",
+        content=json.dumps(export_data, indent=2, ensure_ascii=False),
+    )
+
+
+def _export_markdown(content: Content, key_points: list[str]) -> ExportResponse:
     md_lines = [
         f"# {content.title}",
         "",
@@ -242,18 +249,13 @@ def export_content(
     ]
     if content.detected_language != "en" and content.original_transcript:
         md_lines += [f"## Original Transcript ({content.detected_language})", "", content.original_transcript]
-
-    return ExportResponse(
-        format="markdown",
-        filename=f"{content.video_id}_export.md",
-        content="\n".join(md_lines),
-    )
+    return ExportResponse(format="markdown", filename=f"{content.video_id}_export.md", content="\n".join(md_lines))
 
 
 @router.get("/contents", response_model=list[ContentListItem])
 def list_contents(
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
     demo_only: bool = False,
     db: Session = Depends(get_db),
 ):
@@ -261,5 +263,5 @@ def list_contents(
     query = db.query(Content)
     if demo_only:
         query = query.filter(Content.is_demo.is_(True))
-    contents = query.order_by(Content.created_at.desc()).offset(skip).limit(min(limit, 100)).all()
+    contents = query.order_by(Content.created_at.desc()).offset(skip).limit(limit).all()
     return [ContentListItem.model_validate(c) for c in contents]
