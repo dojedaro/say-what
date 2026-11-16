@@ -62,7 +62,7 @@ flowchart LR
 
 ## Results so far
 
-- **61 tests pass in about 7 seconds** with a fake LLM and retriever, so no API keys are needed. They
+- **62 tests pass in about 7 seconds** with a fake LLM and retriever, so no API keys are needed. They
   cover the API, chat service, chunker, extractor and the LLM provider adapters.
 - **Retrieval quality isn't measured yet**, so this README makes no accuracy claim. The plan is in
   [Limitations and next steps](#limitations-and-next-steps).
@@ -135,7 +135,7 @@ app/
     ├── chunker.py        # Token-aware chunking with overlap
     ├── vector_store.py   # ChromaDB, one collection per video
     └── chat.py           # Translate → retrieve → grounded answer
-tests/                    # 61 tests: unit (chunking, LLM adapters, chat) + HTTP (TestClient)
+tests/                    # 62 tests: unit (chunking, LLM adapters, chat) + HTTP (TestClient)
 ```
 
 ## Development
